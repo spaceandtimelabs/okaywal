@@ -127,6 +127,63 @@ fn basic<M: FileManager, P: AsRef<Path>>(manager: M, path: P) {
     assert!(reader.crc_is_valid().expect("error validating crc"));
 }
 
+/// Tests that it's possible to order checkpoints on demand and that it's possible to wait
+/// for a given entry to be checkpointed.
+fn commit_with_checkpoint<M: FileManager, P: AsRef<Path>>(manager: M, path: P) {
+    let checkpointer = LoggingCheckpointer::default();
+    let config = Configuration::default_with_manager(path, manager);
+    let wal = config.open(checkpointer.clone()).unwrap();
+
+    // Now let's write a record, it should not be checkpointed since we haven't
+    // reached the limits.
+    let m1 = b"first message";
+
+    let mut writer = wal.begin_entry().unwrap();
+    writer.write_chunk(m1).unwrap();
+    let entry1 = writer.commit().unwrap();
+
+    // Since there was no checkpointing done, the number of checkpointed messages in the
+    // checkpointer should be zero.
+    let invocations = checkpointer.invocations.lock();
+    assert!(invocations.is_empty());
+    drop(invocations);
+
+    // Now let's write a second message. It should be checkpointed because we explicitly
+    // indicate that it needs to.
+    let m2 = b"second message";
+
+    let mut writer = wal.begin_entry().unwrap();
+    writer.write_chunk(m2).unwrap();
+    let entry2 = writer.commit_and_checkpoint().unwrap();
+
+    wal.wait_checkpointed_for(&entry1, Duration::from_secs(2))
+        .unwrap();
+
+    let invocations = checkpointer.invocations.lock();
+    println!("Invocations: {invocations:?}");
+    assert_eq!(invocations.len(), 1);
+    match &invocations[0] {
+        CheckpointCall::Checkpoint { data } => {
+            assert_eq!(data.len(), 2);
+            assert_eq!(data[&entry1][0], m1.to_vec());
+            assert_eq!(data[&entry2][0], m2.to_vec());
+        }
+        other => unreachable!("unexpected invocation: {other:?}"),
+    }
+}
+
+#[test]
+fn checkpoint_std() {
+    let dir = tempdir().unwrap();
+    commit_with_checkpoint(StdFileManager::default(), &dir);
+}
+
+#[test]
+fn checkpoint_memory() {
+    let dir = tempdir().unwrap();
+    commit_with_checkpoint(MemoryFileManager::default(), &dir);
+}
+
 #[test]
 fn basic_std() {
     let dir = tempdir().unwrap();

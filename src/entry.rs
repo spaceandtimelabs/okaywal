@@ -1,4 +1,4 @@
-use std::io::{self, Read, Write};
+use std::io::{self, Error, Read, Write};
 
 use crc32c::crc32c_append;
 use file_manager::FileManager;
@@ -59,6 +59,32 @@ where
         self.id
     }
 
+    fn commit_internal<F: FnOnce(&mut LogFileWriter<M::File>) -> io::Result<()>>(
+        &mut self,
+        callback: F,
+    ) -> io::Result<u64> {
+        let file = self.file.as_ref().expect("Already committed");
+        let mut writer = file.lock();
+        writer.write_all(&[END_OF_ENTRY])?;
+        let new_length = writer.position();
+        writer.set_last_entry_id(Some(self.id));
+        callback(&mut writer)?;
+        drop(writer);
+        Ok(new_length)
+    }
+
+    pub fn commit_and_checkpoint(mut self) -> io::Result<EntryId> {
+        let new_length = self.commit_internal(|_file| Ok(()))?;
+        let sender = &self.log.data.checkpoint_sender;
+        let id = self.id;
+        let file = self.file.take().expect("Already committed");
+        sender
+            .send(crate::CheckpointCommand::Checkpoint(file.clone()))
+            .map_err(|se| Error::new(io::ErrorKind::Other, se.to_string()))?;
+        self.log.reclaim(file, WriteResult::Entry { new_length })?;
+        Ok(id)
+    }
+
     /// Commits this entry to the log. Once this call returns, all data is
     /// atomically updated and synchronized to disk.
     ///
@@ -73,19 +99,12 @@ where
         mut self,
         callback: F,
     ) -> io::Result<EntryId> {
-        let file = self.file.take().expect("already committed");
-
-        let mut writer = file.lock();
-
-        writer.write_all(&[END_OF_ENTRY])?;
-        let new_length = writer.position();
-        callback(&mut writer)?;
-        writer.set_last_entry_id(Some(self.id));
-        drop(writer);
-
+        let new_length = self.commit_internal(callback)?;
+        let id = self.id;
+        let file = self.file.take().expect("file already dropped");
         self.log.reclaim(file, WriteResult::Entry { new_length })?;
 
-        Ok(self.id)
+        Ok(id)
     }
 
     /// Abandons this entry, preventing the entry from being recovered in the

@@ -16,6 +16,7 @@ crc32c = "0.6.3"
 flume = "0.10.14"
 tracing = { version = "0.1.36", optional = true }
 file-manager = { git = "https://github.com/khonsulabs/file-manager", branch = "main" }
+log = "0.4.19"
 
 [dev-dependencies]
 tempfile = "3.3.0"

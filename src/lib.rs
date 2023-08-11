@@ -24,6 +24,7 @@ use std::{
 };
 
 use file_manager::{fs::StdFileManager, FileManager, OpenOptions, PathId};
+use log::{debug, error, info};
 use parking_lot::{Condvar, Mutex, MutexGuard};
 
 pub use crate::{
@@ -101,6 +102,7 @@ where
         config: Configuration<M>,
         mut manager: Manager,
     ) -> io::Result<Self> {
+        info!("Opening WAL with config: {:?}", config);
         if !config.file_manager.exists(&config.directory) {
             config.file_manager.create_dir_all(&config.directory)?;
         }
@@ -328,11 +330,14 @@ where
         data: &Weak<Data<M>>,
         checkpoint_receiver: &flume::Receiver<CheckpointCommand<M::File>>,
     ) -> io::Result<()> {
+        debug!("Checkpointing thread started.");
         while let Ok(CheckpointCommand::Checkpoint(file_to_checkpoint)) = checkpoint_receiver.recv()
         {
+            debug!("Received file to checkpoint: {:?}", file_to_checkpoint);
             let wal = if let Some(data) = data.upgrade() {
                 WriteAheadLog { data }
             } else {
+                info!("No WAL available. Checkpointing thread stopping.");
                 break;
             };
 
@@ -347,13 +352,15 @@ where
                     SegmentReader::new(writer.path(), file_id, &wal.data.config.file_manager)?;
                 drop(writer);
                 let mut manager = wal.data.manager.lock();
-                manager.checkpoint_to(entry_id, &mut reader, &wal)?;
+                if let Err(error) = manager.checkpoint_to(entry_id, &mut reader, &wal) {
+                    error!("Checkpointer failed with error: {error:?}. Skipping checkpoint");
+                    continue;
+                }
                 writer = file_to_checkpoint.lock();
                 Some(entry_id)
             } else {
                 None
             };
-
             // Rename the file to denote that it's been checkpointed.
             let new_name = format!(
                 "{}-cp",
@@ -390,11 +397,19 @@ where
             if let Some(entry_id) = files.last_checkpointed_entry_id {
                 if let Some(last_checkpointed_entry_id) = last_checkpointed_entry_id {
                     if last_checkpointed_entry_id.0 > entry_id.0 {
+                        debug!(
+                            "Checkpointing finished. Set the last checkpointed entry it to: {:?}",
+                            last_checkpointed_entry_id
+                        );
                         files.last_checkpointed_entry_id = Some(last_checkpointed_entry_id);
                         wal.data.checkpoint_sync.notify_all();
                     }
                 }
             } else {
+                debug!(
+                    "Checkpointing finished. Set the last checkpointed entry it to: {:?}",
+                    last_checkpointed_entry_id
+                );
                 files.last_checkpointed_entry_id = last_checkpointed_entry_id;
                 wal.data.checkpoint_sync.notify_all();
             }

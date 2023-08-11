@@ -161,7 +161,6 @@ where
         last_entry_id: Option<EntryId>,
         config: &Configuration<F::Manager>,
     ) -> io::Result<Self> {
-        println!("New {}", path.display());
         let mut file = config.file_manager.open(
             &path,
             OpenOptions::new().create(true).write(true).read(true),

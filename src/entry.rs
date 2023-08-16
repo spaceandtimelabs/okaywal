@@ -1,5 +1,4 @@
-use std::io::{self, Error, Read, Write};
-
+use std::io::{self, Read, Write};
 use crc32c::crc32c_append;
 use file_manager::FileManager;
 use parking_lot::MutexGuard;
@@ -73,15 +72,14 @@ where
         Ok(new_length)
     }
 
+    /// Commits this entry to the log and forces a checkpoint to happen.
+    ///
+    /// See `commit`.
     pub fn commit_and_checkpoint(mut self) -> io::Result<EntryId> {
         let new_length = self.commit_internal(|_file| Ok(()))?;
-        let sender = &self.log.data.checkpoint_sender;
         let id = self.id;
         let file = self.file.take().expect("Already committed");
-        sender
-            .send(crate::CheckpointCommand::Checkpoint(file.clone()))
-            .map_err(|se| Error::new(io::ErrorKind::Other, se.to_string()))?;
-        self.log.reclaim(file, WriteResult::Entry { new_length })?;
+        self.log.reclaim(file, WriteResult::Entry { new_length }, true)?;
         Ok(id)
     }
 
@@ -102,8 +100,7 @@ where
         let new_length = self.commit_internal(callback)?;
         let id = self.id;
         let file = self.file.take().expect("file already dropped");
-        self.log.reclaim(file, WriteResult::Entry { new_length })?;
-
+        self.log.reclaim(file, WriteResult::Entry { new_length }, false)?;
         Ok(id)
     }
 
@@ -120,8 +117,7 @@ where
         let mut writer = file.lock();
         writer.revert_to(self.original_length)?;
         drop(writer);
-
-        self.log.reclaim(file, WriteResult::RolledBack).unwrap();
+        self.log.reclaim(file, WriteResult::RolledBack, false).unwrap();
 
         Ok(())
     }

@@ -269,34 +269,40 @@ where
         }
     }
 
-    fn reclaim(&self, file: LogFile<M::File>, result: WriteResult) -> io::Result<()> {
+    fn reclaim(
+        &self,
+        file: LogFile<M::File>,
+        result: WriteResult,
+        force_checkpoint: bool,
+    ) -> io::Result<()> {
         if let WriteResult::Entry { new_length } = result {
-            let last_directory_sync = if self.data.config.checkpoint_after_bytes <= new_length {
-                // Checkpoint this file. This first means activating a new file.
-                let mut files = self.data.files.lock();
-                files.activate_new_file(&self.data.config)?;
-                let last_directory_sync = files.directory_synced_at;
-                drop(files);
-                self.data.active_sync.notify_one();
+            let last_directory_sync =
+                if self.data.config.checkpoint_after_bytes <= new_length || force_checkpoint {
+                    // Checkpoint this file. This first means activating a new file.
+                    let mut files = self.data.files.lock();
+                    files.activate_new_file(&self.data.config)?;
+                    let last_directory_sync = files.directory_synced_at;
+                    drop(files);
+                    self.data.active_sync.notify_one();
 
-                // Now, send the file to the checkpointer.
-                self.data
-                    .checkpoint_sender
-                    .send(CheckpointCommand::Checkpoint(file.clone()))
-                    .to_io()?;
+                    // Now, send the file to the checkpointer.
+                    self.data
+                        .checkpoint_sender
+                        .send(CheckpointCommand::Checkpoint(file.clone()))
+                        .to_io()?;
 
-                last_directory_sync
-            } else {
-                // We wrote an entry, but the file isn't ready to be
-                // checkpointed. Return the file to allow more writes to happen
-                // in the meantime.
-                let mut files = self.data.files.lock();
-                files.active = Some(file.clone());
-                let last_directory_sync = files.directory_synced_at;
-                drop(files);
-                self.data.active_sync.notify_one();
-                last_directory_sync
-            };
+                    last_directory_sync
+                } else {
+                    // We wrote an entry, but the file isn't ready to be
+                    // checkpointed. Return the file to allow more writes to happen
+                    // in the meantime.
+                    let mut files = self.data.files.lock();
+                    files.active = Some(file.clone());
+                    let last_directory_sync = files.directory_synced_at;
+                    drop(files);
+                    self.data.active_sync.notify_one();
+                    last_directory_sync
+                };
 
             // Before reporting success we need to synchronize the data to
             // disk. To enable as much throughput as possible, we only want

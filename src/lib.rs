@@ -269,6 +269,12 @@ where
         }
     }
 
+    /// Returns the number of checkpoints that are pending.
+    #[must_use]
+    pub fn pending_checkpoints(&self) -> usize {
+        self.data.checkpoint_sender.len()
+    }
+
     fn reclaim(
         &self,
         file: LogFile<M::File>,
@@ -359,8 +365,11 @@ where
                 drop(writer);
                 let mut manager = wal.data.manager.lock();
                 if let Err(error) = manager.checkpoint_to(entry_id, &mut reader, &wal) {
-                    error!("Checkpointer failed with error: {error:?}. Skipping checkpoint");
-                    continue;
+                    let message = format!(
+                        "Fatal Error: Checkpointer failed with error: {error:?}. Cannot proceed."
+                    );
+                    error!("{}", message);
+                    panic!("{}", message);
                 }
                 writer = file_to_checkpoint.lock();
                 Some(entry_id)

@@ -32,6 +32,9 @@ pub struct Configuration<M> {
     /// was to allow detection of what format or version of a format the data
     /// was inside of the log without needing to parse the entries.
     pub version_info: Arc<Vec<u8>>,
+    /// The maximum disk usage, in percent, before writes start to be rejected.
+    /// Must be a value between 0 and 100.
+    pub max_disk_usage_percent: u16,
 }
 
 impl Default for Configuration<StdFileManager> {
@@ -72,6 +75,7 @@ where
             checkpoint_after_bytes: kilobytes(768),
             buffer_bytes: kilobytes(16),
             version_info: Arc::default(),
+            max_disk_usage_percent: 95,
         }
     }
     /// Sets the number of bytes to preallocate for each segment file. Returns `self`.

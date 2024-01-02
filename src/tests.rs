@@ -1,6 +1,6 @@
 use std::{
     collections::{BTreeMap, HashMap},
-    io::{Read, Write},
+    io::{self, Read, Write},
     iter::repeat_with,
     path::Path,
     sync::Arc,
@@ -182,6 +182,33 @@ fn checkpoint_std() {
 fn checkpoint_memory() {
     let dir = tempdir().unwrap();
     commit_with_checkpoint(MemoryFileManager::default(), &dir);
+}
+
+fn try_append_entry<M: FileManager, P: AsRef<Path>>(
+    manager: M,
+    path: P,
+    percent: u16,
+) -> Result<(), io::Error> {
+    let checkpointer = LoggingCheckpointer::default();
+    let mut config = Configuration::default_with_manager(path, manager);
+    config.max_disk_usage_percent = percent;
+    let wal = config.open(checkpointer.clone())?;
+
+    wal.begin_entry().map(|_| ())
+}
+
+#[test]
+fn test_max_disk_usage_percent_std_enough_disk_space() {
+    let dir = tempdir().unwrap();
+    assert!(try_append_entry(StdFileManager::default(), &dir, 100).is_ok());
+}
+
+#[test]
+fn test_max_disk_usage_percent_std_not_enough_disk_space() {
+    let dir = tempdir().unwrap();
+    let result = try_append_entry(StdFileManager::default(), &dir, 0);
+    assert!(result.is_err());
+    assert_eq!(result.err().unwrap().kind(), io::ErrorKind::OutOfMemory);
 }
 
 #[test]

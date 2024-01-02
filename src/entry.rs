@@ -1,7 +1,7 @@
-use std::io::{self, Read, Write};
 use crc32c::crc32c_append;
 use file_manager::FileManager;
 use parking_lot::MutexGuard;
+use std::io::{self, Read, Write};
 
 use crate::{
     log_file::{LogFile, LogFileWriter},
@@ -79,7 +79,8 @@ where
         let new_length = self.commit_internal(|_file| Ok(()))?;
         let id = self.id;
         let file = self.file.take().expect("Already committed");
-        self.log.reclaim(file, WriteResult::Entry { new_length }, true)?;
+        self.log
+            .reclaim(file, WriteResult::Entry { new_length }, true)?;
         Ok(id)
     }
 
@@ -100,7 +101,8 @@ where
         let new_length = self.commit_internal(callback)?;
         let id = self.id;
         let file = self.file.take().expect("file already dropped");
-        self.log.reclaim(file, WriteResult::Entry { new_length }, false)?;
+        self.log
+            .reclaim(file, WriteResult::Entry { new_length }, false)?;
         Ok(id)
     }
 
@@ -117,7 +119,9 @@ where
         let mut writer = file.lock();
         writer.revert_to(self.original_length)?;
         drop(writer);
-        self.log.reclaim(file, WriteResult::RolledBack, false).unwrap();
+        self.log
+            .reclaim(file, WriteResult::RolledBack, false)
+            .unwrap();
 
         Ok(())
     }

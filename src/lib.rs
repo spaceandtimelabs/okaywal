@@ -224,6 +224,20 @@ where
     /// This call will acquire an exclusive lock to the active file or block
     /// until it can be acquired.
     pub fn begin_entry(&self) -> io::Result<EntryWriter<'_, M>> {
+        // Check if we're below the available space limit, otherwise refuse to allow
+        // to begin the entry. This doesn't mean we couldn't actually write the entry
+        // since the WAL files are pre-allocated, but it could mean that the
+        // checkpointing thread either failed or would fail for lack of space, so it's
+        // better to refuse transactions to gitve an opportunity to delete files.
+        if !is_enough_space_available(&self.data.config)? {
+            error!("Not enough space available to append to WAL! Available space (bytes): {:?}. Total space (bytes): {:?}",
+                   available_space_bytes(&self.data.config)?, total_space_bytes(&self.data.config)?);
+            return Err(io::Error::new(
+                io::ErrorKind::OutOfMemory,
+                "Storage is full",
+            ));
+        }
+
         let mut files = self.data.files.lock();
         let file = loop {
             if let Some(file) = files.active.take() {
@@ -543,6 +557,21 @@ where
     }
 }
 
+fn available_space_bytes<M: FileManager>(config: &Configuration<M>) -> io::Result<u64> {
+    config.file_manager.available_space_bytes(&config.directory)
+}
+
+fn total_space_bytes<M: FileManager>(config: &Configuration<M>) -> io::Result<u64> {
+    config.file_manager.total_space_bytes(&config.directory)
+}
+
+fn is_enough_space_available<M: FileManager>(config: &Configuration<M>) -> io::Result<bool> {
+    let available_space_percent =
+        u16::try_from(available_space_bytes(config)? * 100 / total_space_bytes(config)?)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+    Ok(available_space_percent <= config.max_disk_usage_percent)
+}
+
 enum CheckpointCommand<F>
 where
     F: file_manager::File,
@@ -579,6 +608,14 @@ where
             self.all.insert(next_id, all_entry);
             file
         } else {
+            if !is_enough_space_available(config)? {
+                error!("Not enough space available activate new file! Available space (bytes): {:?}. Total space (bytes): {:?}",
+                   available_space_bytes(config)?, total_space_bytes(config)?);
+                return Err(io::Error::new(
+                    io::ErrorKind::OutOfMemory,
+                    "Storage is full",
+                ));
+            }
             let file = LogFile::write(
                 next_id,
                 config.directory.join(file_name).into(),

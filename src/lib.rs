@@ -569,7 +569,8 @@ fn is_enough_space_available<M: FileManager>(config: &Configuration<M>) -> io::R
     let available_space_percent =
         u16::try_from(available_space_bytes(config)? * 100 / total_space_bytes(config)?)
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-    Ok(available_space_percent <= config.max_disk_usage_percent)
+    let used_space_percent = 100 - available_space_percent;
+    Ok(used_space_percent <= config.max_disk_usage_percent)
 }
 
 enum CheckpointCommand<F>

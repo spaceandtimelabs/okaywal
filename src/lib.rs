@@ -289,6 +289,13 @@ where
         self.data.checkpoint_sender.len()
     }
 
+    /// Returns whether the checkpoint thread is live.
+    #[must_use]
+    pub fn is_checkpoint_thread_running(&self) -> bool {
+        let thread_handle = self.data.checkpoint_thread.lock();
+        thread_handle.is_some() && !thread_handle.as_ref().unwrap().is_finished()
+    }
+
     fn reclaim(
         &self,
         file: LogFile<M::File>,
@@ -380,10 +387,10 @@ where
                 let mut manager = wal.data.manager.lock();
                 if let Err(error) = manager.checkpoint_to(entry_id, &mut reader, &wal) {
                     let message = format!(
-                        "Fatal Error: Checkpointer failed with error: {error:?}. Cannot proceed."
+                        "Error: Checkpointer failed with error: {error:?}. Cannot proceed."
                     );
                     error!("{}", message);
-                    panic!("{}", message);
+                    return Err(error);
                 }
                 writer = file_to_checkpoint.lock();
                 Some(entry_id)

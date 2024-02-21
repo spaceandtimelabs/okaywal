@@ -308,7 +308,8 @@ impl<F> SegmentReader<F>
 where
     F: file_manager::File,
 {
-    pub(crate) fn new<M>(path: &PathId, file_id: u64, manager: &M) -> io::Result<Self>
+
+    pub fn new<M>(path: &PathId, file_id: u64, manager: &M) -> io::Result<Self>
     where
         M: FileManager<File = F>,
     {

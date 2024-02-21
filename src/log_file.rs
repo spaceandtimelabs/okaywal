@@ -302,6 +302,7 @@ where
     pub(crate) first_entry_id: Option<EntryId>,
     pub(crate) last_entry_id: Option<EntryId>,
     pub(crate) valid_until: u64,
+    pub(crate) path: PathId,
 }
 
 impl<F> SegmentReader<F>
@@ -349,6 +350,7 @@ where
             first_entry_id: None,
             last_entry_id: None,
             valid_until: u64::from(version_info_length) + 5,
+            path: path.clone(),
         })
     }
 
@@ -404,6 +406,11 @@ where
                 .expect("read_next_entry populated this"),
             reader: self,
         }))
+    }
+
+    ///
+    pub fn file_path(&self) -> &PathId {
+        &self.path
     }
 }
 

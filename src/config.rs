@@ -32,6 +32,9 @@ pub struct Configuration<M> {
     /// was to allow detection of what format or version of a format the data
     /// was inside of the log without needing to parse the entries.
     pub version_info: Arc<Vec<u8>>,
+    /// The max number of inactive files to keep around.
+    /// This is a soft limit.
+    pub max_inactive_files: u32,
     /// The maximum disk usage, in percent, before writes start to be rejected.
     /// Must be a value between 0 and 100.
     pub max_disk_usage_percent: u16,
@@ -75,6 +78,7 @@ where
             checkpoint_after_bytes: kilobytes(768),
             buffer_bytes: kilobytes(16),
             version_info: Arc::default(),
+            max_inactive_files: 10,
             max_disk_usage_percent: 95,
         }
     }
@@ -106,6 +110,13 @@ where
     /// writing data to the log. Returns `self`.
     pub fn buffer_bytes(mut self, bytes: usize) -> Self {
         self.buffer_bytes = bytes;
+        self
+    }
+
+    /// Sets the maximum number of inactive files to keep around.
+    /// Returns 'self'.
+    pub fn max_inactive_files(mut self, max_inactive_files: u32) -> Self {
+        self.max_inactive_files = max_inactive_files;
         self
     }
 

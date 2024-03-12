@@ -48,6 +48,14 @@ where
         })
     }
 
+    pub fn path(&self) -> PathId {
+        self.data
+            .writer
+            .lock()
+            .path()
+            .clone()
+    }
+
     pub fn created_at(&self) -> Option<Instant> {
         self.data.created_at
     }

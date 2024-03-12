@@ -24,7 +24,7 @@ use std::{
 };
 
 use file_manager::{fs::StdFileManager, FileManager, OpenOptions, PathId};
-use log::{debug, error, info};
+use log::{debug, error, info, warn};
 use parking_lot::{Condvar, Mutex, MutexGuard};
 
 pub use crate::{
@@ -170,6 +170,24 @@ where
                     }
                 }
             }
+        }
+
+        // Trim inactive files to the size allowed in configuration.
+        if files.inactive.len() > config.max_inactive_files as usize {
+            let range_to_delete: Vec<LogFile<M::File>> = files
+                .inactive
+                .iter()
+                .skip(files.inactive.len() - config.max_inactive_files as usize)
+                .cloned()
+                .collect();
+
+            for file in range_to_delete {
+                config
+                    .file_manager
+                    .remove_file(&file.path())
+                    .unwrap_or_else(|_| warn!("Couldn't remove file: {:?}", file));
+            }
+            files.inactive.truncate(config.max_inactive_files as usize);
         }
 
         // If we recovered a file that wasn't checkpointed, activate it.

@@ -1,6 +1,6 @@
 use std::{
     collections::{BTreeMap, HashMap},
-    io::{Read, Write},
+    io::{self, ErrorKind, Read, Write},
     iter::repeat_with,
     path::Path,
     sync::Arc,
@@ -182,6 +182,33 @@ fn checkpoint_std() {
 fn checkpoint_memory() {
     let dir = tempdir().unwrap();
     commit_with_checkpoint(MemoryFileManager::default(), &dir);
+}
+
+fn try_append_entry<M: FileManager, P: AsRef<Path>>(
+    manager: M,
+    path: P,
+    percent: u16,
+) -> Result<(), io::Error> {
+    let checkpointer = LoggingCheckpointer::default();
+    let mut config = Configuration::default_with_manager(path, manager);
+    config.max_disk_usage_percent = percent;
+    let wal = config.open(checkpointer.clone())?;
+
+    wal.begin_entry().map(|_| ())
+}
+
+#[test]
+fn test_max_disk_usage_percent_std_enough_disk_space() {
+    let dir = tempdir().unwrap();
+    assert!(try_append_entry(StdFileManager::default(), &dir, 100).is_ok());
+}
+
+#[test]
+fn test_max_disk_usage_percent_std_not_enough_disk_space() {
+    let dir = tempdir().unwrap();
+    let result = try_append_entry(StdFileManager::default(), &dir, 0);
+    assert!(result.is_err());
+    assert_eq!(result.err().unwrap().kind(), io::ErrorKind::OutOfMemory);
 }
 
 #[test]
@@ -413,4 +440,69 @@ fn always_checkpointing_std() {
 #[test]
 fn always_checkpointing_memory() {
     always_checkpointing(MemoryFileManager::default(), "/");
+}
+
+#[derive(Debug)]
+struct FailingCheckpointer {
+    call_count: u32,
+    call_limit: u32,
+}
+
+impl FailingCheckpointer {
+    pub fn new(call_limit: u32) -> Self {
+        Self {
+            call_count: 0,
+            call_limit,
+        }
+    }
+}
+
+impl LogManager for FailingCheckpointer {
+    fn recover(&mut self, _entry: &mut Entry<'_>) -> std::io::Result<()> {
+        Ok(())
+    }
+
+    fn checkpoint_to(
+        &mut self,
+        _last_checkpointed_id: EntryId,
+        _reader: &mut SegmentReader,
+        _wal: &WriteAheadLog,
+    ) -> std::io::Result<()> {
+        self.call_count += 1;
+        if self.call_count >= self.call_limit {
+            println!("Call limit reached, returning err so that that checkpointer thread returns");
+            return Err(io::Error::new(io::ErrorKind::BrokenPipe, ""));
+        }
+        println!(
+            "Call limit not reached yet. current count: {:?}, limit: {:?}",
+            self.call_count, self.call_limit
+        );
+        Ok(())
+    }
+}
+
+#[test]
+fn test_is_checkpoint_thread_running() {
+    let dir = tempdir().unwrap();
+    let checkpointer = FailingCheckpointer::new(2);
+    let config = Configuration::default_with_manager(dir.as_ref(), StdFileManager::default())
+        .checkpoint_after_bytes(33);
+
+    // First write doesn't cause the checkpointing thread to halt.
+    let wal = config.open(checkpointer).unwrap();
+    let mut writer = wal.begin_entry().unwrap();
+    let _record = writer.write_chunk(&0i32.to_be_bytes()).unwrap();
+    let written_entry_id = writer.commit_and_checkpoint().unwrap();
+    wal.wait_checkpointed_for(&written_entry_id, Duration::from_secs(10 * 60))
+        .unwrap();
+    assert!(wal.is_checkpoint_thread_running());
+
+    // Second write causes the checkpoitning thread to halt.
+    let mut writer = wal.begin_entry().unwrap();
+    let _record = writer.write_chunk(&0i32.to_be_bytes()).unwrap();
+    let written_entry_id = writer.commit_and_checkpoint().unwrap();
+    // Since the thread is halted waititng for a checkpoint times out.
+    let result = wal.wait_checkpointed_for(&written_entry_id, Duration::from_secs(10));
+    assert!(result.is_err() && result.err().unwrap().kind() == ErrorKind::TimedOut);
+    assert!(!wal.is_checkpoint_thread_running());
 }

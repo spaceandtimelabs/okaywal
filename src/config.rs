@@ -35,6 +35,9 @@ pub struct Configuration<M> {
     /// The max number of inactive files to keep around.
     /// This is a soft limit.
     pub max_inactive_files: u32,
+    /// The maximum disk usage, in percent, before writes start to be rejected.
+    /// Must be a value between 0 and 100.
+    pub max_disk_usage_percent: u16,
 }
 
 impl Default for Configuration<StdFileManager> {
@@ -76,6 +79,7 @@ where
             buffer_bytes: kilobytes(16),
             version_info: Arc::default(),
             max_inactive_files: 10,
+            max_disk_usage_percent: 95,
         }
     }
     /// Sets the number of bytes to preallocate for each segment file. Returns `self`.
